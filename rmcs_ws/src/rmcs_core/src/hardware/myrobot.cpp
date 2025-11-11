@@ -1,3 +1,4 @@
+#include <rclcpp/logging.hpp>
 #include <rclcpp/node.hpp>
 #include <rmcs_executor/component.hpp>
 #include <librmcs/client/dm_mc02.hpp>
@@ -24,6 +25,7 @@ public:
     Myrobot()
         : Node{get_component_name(), rclcpp::NodeOptions{}.automatically_declare_parameters_from_overrides(true)}
         , command_component_(create_partner_component<MyrobotCommand>(get_component_name() + "_command", *this))
+        , arm_ctrl_(create_partner_component<Arm_Ctrl>(get_component_name() + "_arm_ctrl", *this))
         , dm_motor_ctrl_(create_partner_component<DM_Motor_Ctrl>(get_component_name() + "_dm_motor_ctrl", *this))
         , rs01_motor_ctrl_(create_partner_component<RS01_Motor_Ctrl>(get_component_name() + "_rs01_motor_ctrl", *this))
         , chassis_ctrl_(create_partner_component<Chassis_Ctrl>(get_component_name() + "_chassis_ctrl", *this))
@@ -54,6 +56,22 @@ public:
         get_parameter("m2006_integral_max").as_double(),
              get_parameter("m2006_max_vel").as_double(),
           get_parameter("m2006_max_torque").as_double()
+            );
+            arm_ctrl_->set_arm_m2006_param(
+                            get_parameter("arm_m2006_pos_kp").as_double(),
+                            get_parameter("arm_m2006_pos_ki").as_double(),
+                            get_parameter("arm_m2006_pos_kd").as_double(),
+                     get_parameter("arm_m2006_pos_dead_zone").as_double(),
+                  get_parameter("arm_m2006_pos_integral_min").as_double(),
+                  get_parameter("arm_m2006_pos_integral_max").as_double(),
+                            get_parameter("arm_m2006_vel_kp").as_double(),
+                            get_parameter("arm_m2006_vel_ki").as_double(),
+                            get_parameter("arm_m2006_vel_kd").as_double(),
+                     get_parameter("arm_m2006_vel_dead_zone").as_double(),
+                  get_parameter("arm_m2006_vel_integral_min").as_double(),
+                  get_parameter("arm_m2006_vel_integral_max").as_double(),
+                           get_parameter("arm_m2006_max_vel").as_double(),
+                        get_parameter("arm_m2006_max_torque").as_double()
             );
         }
 
@@ -210,8 +228,7 @@ private:
     public:
         friend class Myrobot;
         explicit Chassis_Ctrl(Myrobot& myrobot)
-            : myrobot_(myrobot)
-            , raw_target_vel_{0.0, 0.0, 0.0}         
+            : raw_target_vel_{0.0, 0.0, 0.0}         
             , filtered_target_vel_{0.0, 0.0, 0.0}           
             , wheel_target_vel_{0.0, 0.0, 0.0, 0.0}           
             , wheel_current_vel_{0.0, 0.0, 0.0, 0.0}           
@@ -448,7 +465,6 @@ private:
             wheel_target_vel_[2] = (vx - vy + omega * R) * inv_wheel_radius_; // 右后
             wheel_target_vel_[3] = (vx + vy - omega * R) * inv_wheel_radius_; // 左后
         }
-        Myrobot& myrobot_;
         static constexpr double dt = 0.001; // 时间步长
         double chassis_radius;
         double max_linear_vel;
@@ -503,6 +519,8 @@ private:
             , joint_pos_{0.0, 0.0, 0.0, 0.0}
             , joint_vel_{0.0, 0.0, 0.0, 0.0}
             , joint_cmd_{0.0, 0.0, 0.0, 0.0}
+            , joint4_pos_pid_calculator_(0, 0, 0)  // 位置环PID
+            , joint4_vel_pid_calculator_(0, 0, 0)  // 速度环PID
             {
                 register_output("/myrobot/arm/joint1/pos", joint1_pos_,false);
                 register_output("/myrobot/arm/joint1/vel", joint1_vel_,false);
@@ -512,15 +530,51 @@ private:
                 register_output("/myrobot/arm/joint3/vel", joint3_vel_,false);
                 register_output("/myrobot/arm/joint4/pos", joint4_pos_,false);
                 register_output("/myrobot/arm/joint4/vel", joint4_vel_,false);
+                register_output("/arm/joint4/motor/control_torque", joint4_motor_torque_,false);
 
                 register_input("/myrobot/arm/joint1/cmd", joint1_cmd_,false);
                 register_input("/myrobot/arm/joint2/cmd", joint2_cmd_,false);
                 register_input("/myrobot/arm/joint3/cmd", joint3_cmd_,false);
                 register_input("/myrobot/arm/joint4/cmd", joint4_cmd_,false);
             }
-
+            void set_arm_m2006_param(
+                    double pos_kp, double pos_ki, double pos_kd, double pos_dead_zone,
+                    double pos_integral_min, double pos_integral_max,
+                    double vel_kp, double vel_ki, double vel_kd, double vel_dead_zone,
+                    double vel_integral_min, double vel_integral_max,
+                    double max_vel, double max_torque)
+                {
+                    arm_m2006_config_ = ArmM2006PIDConfig{
+                        pos_kp, pos_ki, pos_kd, pos_dead_zone, pos_integral_min, pos_integral_max,
+                        vel_kp, vel_ki, vel_kd, vel_dead_zone, vel_integral_min, vel_integral_max,
+                        max_vel, max_torque
+                    };
+                    
+                    // 初始化PID控制器
+                    joint4_pos_pid_calculator_ = rmcs_core::controller::pid::MatrixPidCalculator<1>(
+                        pos_kp, pos_ki, pos_kd);
+                    joint4_vel_pid_calculator_ = rmcs_core::controller::pid::MatrixPidCalculator<1>(
+                        vel_kp, vel_ki, vel_kd);
+                        
+                    // 设置积分限幅
+                    joint4_pos_pid_calculator_.integral_min[0] = pos_integral_min;
+                    joint4_pos_pid_calculator_.integral_max[0] = pos_integral_max;
+                    joint4_vel_pid_calculator_.integral_min[0] = vel_integral_min;
+                    joint4_vel_pid_calculator_.integral_max[0] = vel_integral_max;
+                }
+        struct GO1_Command{
+            float T;
+            float Kp;
+            float Pos;
+            float Kd;
+            float V;
+        };
+        const std::array<GO1_Command, 3>& get_go1_command() const{return go1_command_;}
         void update() override {
-
+            read_from_hardware();
+            publish_states();
+            read_command();
+            control_joint();
         }
     private:
         void publish_states(){
@@ -546,21 +600,83 @@ private:
             myrobot_.board_->arm_m2006_motor_[0].update_status();
             joint_pos_[3] = myrobot_.board_->arm_m2006_motor_[0].angle();
             joint_vel_[3] = myrobot_.board_->arm_m2006_motor_[0].velocity();
+            RCLCPP_INFO(myrobot_.get_logger(), "joint4 pos: %f, vel: %f", joint_pos_[3], joint_vel_[3]);
+        }
+        void read_command(){
+            joint_cmd_[0] = 0;
+            joint_cmd_[1] = 0;
+            joint_cmd_[2] = 0;
+            joint_cmd_[3] = 2;
+            // // 从输入读取命令到 joint_cmd_（先检查 ready()）
+            // if (joint1_cmd_.ready()) joint_cmd_[0] = *joint1_cmd_;
+            // if (joint2_cmd_.ready()) joint_cmd_[1] = *joint2_cmd_;
+            // if (joint3_cmd_.ready()) joint_cmd_[2] = *joint3_cmd_;
+            // if (joint4_cmd_.ready()) joint_cmd_[3] = *joint4_cmd_;
+        }
+        void control_joint(){
+            for(int i = 0;i<3;i++){
+                float Pos = static_cast<float>(joint_cmd_[i] * 6.33);
+                go1_command_[i].T = 0.0;
+                go1_command_[i].Kp = 0.35;
+                go1_command_[i].Pos = Pos;
+                go1_command_[i].Kd = 0.2;
+                go1_command_[i].V = 0.0;
+            }
+            joint4_control();
+        }
+        void joint4_control(){
+            joint4_pos_error_ = joint_cmd_[3] - joint_pos_[3];
+            if(std::abs(joint4_pos_error_) < arm_m2006_config_.pos_dead_zone){
+                joint4_pos_error_ = 0.0; // 清零误差
+            }
+            Eigen::Matrix<double, 1, 1> pos_error_vec;
+            pos_error_vec[0] = joint4_pos_error_;
+            Eigen::Matrix<double,1,1> target_vel_vec;
+            target_vel_vec = joint4_pos_pid_calculator_.update(pos_error_vec);\
+            joint4_target_vel_ = target_vel_vec[0];
+            joint4_target_vel_ = std::clamp(joint4_target_vel_, -arm_m2006_config_.max_vel, arm_m2006_config_.max_vel);
+            joint4_vel_error_ = joint4_target_vel_ - joint_vel_[3];
+            if(std::abs(joint4_vel_error_) < arm_m2006_config_.vel_dead_zone){
+                joint4_vel_error_ = 0.0; // 清零误差
+            }
+            Eigen::Matrix<double,1,1> vel_error_vec;
+            vel_error_vec[0] = joint4_vel_error_;
+            Eigen::Matrix<double,1,1> motor_torque_vec;
+            motor_torque_vec = joint4_vel_pid_calculator_.update(vel_error_vec);
+            double motor_torque = motor_torque_vec[0];
+            motor_torque = std::clamp(motor_torque, -arm_m2006_config_.max_torque, arm_m2006_config_.max_torque);
+            *joint4_motor_torque_ = motor_torque;
         }
         Myrobot& myrobot_;
 
         std::array<double, 4> joint_pos_;
         std::array<double, 4> joint_vel_;
         std::array<double, 4> joint_cmd_;
+        std::array<GO1_Command, 3> go1_command_;
+        // 关节4串级PID相关变量
+        double joint4_target_vel_;
+        double joint4_pos_error_;
+        double joint4_vel_error_;
         rmcs_executor::Component::OutputInterface<double> joint1_pos_,joint1_vel_;
         rmcs_executor::Component::OutputInterface<double> joint2_pos_,joint2_vel_;
         rmcs_executor::Component::OutputInterface<double> joint3_pos_,joint3_vel_;
         rmcs_executor::Component::OutputInterface<double> joint4_pos_,joint4_vel_;
+        rmcs_executor::Component::OutputInterface<double> joint4_motor_torque_;
 
         rmcs_executor::Component::InputInterface<double> joint1_cmd_;
         rmcs_executor::Component::InputInterface<double> joint2_cmd_;
         rmcs_executor::Component::InputInterface<double> joint3_cmd_;
         rmcs_executor::Component::InputInterface<double> joint4_cmd_;
+        struct ArmM2006PIDConfig {
+        double pos_kp, pos_ki, pos_kd, pos_dead_zone;
+        double pos_integral_min, pos_integral_max;
+        double vel_kp, vel_ki, vel_kd, vel_dead_zone;
+        double vel_integral_min, vel_integral_max;
+        double max_vel, max_torque;
+    };
+    ArmM2006PIDConfig arm_m2006_config_;
+    rmcs_core::controller::pid::MatrixPidCalculator<1> joint4_pos_pid_calculator_;  // 位置环
+    rmcs_core::controller::pid::MatrixPidCalculator<1> joint4_vel_pid_calculator_;  // 速度环
     };
 
 /************************************************************SBUS************************************************************************* */
@@ -807,16 +923,16 @@ private:
                     
                     // ch3: 右摇杆垂直 -> vx（前后移动）
                     // ch2: 右摇杆水平 -> vy（左右移动）
-                    // double vx = remoteData.ch3 / 360.0 * 2.0;      // 归一化并限速到1m/s
-                    // double vy = remoteData.ch2 / 360.0 * 2.0;      // 归一化并限速到1m/s
-                    // double omega = 0.0;  
-                    // RCLCPP_INFO(myrobot_.get_logger(), "SBUS: ch2=%d, ch3=%d", remoteData.ch2, remoteData.ch3); 
-                    // // 控制底盘
-                    // myrobot_.chassis_ctrl_->set_raw_target_vel_(vx, vy, omega);
+                    double vx = remoteData.ch3 / 360.0 * 2.0;      // 归一化并限速到1m/s
+                    double vy = remoteData.ch2 / 360.0 * 2.0;      // 归一化并限速到1m/s
+                    double omega = 0.0;  
+                    RCLCPP_INFO(myrobot_.get_logger(), "SBUS: ch2=%d, ch3=%d", remoteData.ch2, remoteData.ch3); 
+                    // 控制底盘
+                    myrobot_.chassis_ctrl_->set_raw_target_vel_(vx, vy, omega);
 
-                    double left_m2006_vel = remoteData.ch3 / 360.0 * 35.0;
-                    double right_m2006_vel = remoteData.ch2 / 360.0 * 35.0;
-                    myrobot_.chassis_ctrl_->set_m2006_raw_target_vel_(left_m2006_vel, right_m2006_vel);
+                    // double left_m2006_vel = remoteData.ch3 / 360.0 * 35.0;
+                    // double right_m2006_vel = remoteData.ch2 / 360.0 * 35.0;
+                    // myrobot_.chassis_ctrl_->set_m2006_raw_target_vel_(left_m2006_vel, right_m2006_vel);
                     // ================== SE 按键处理 =================
                     if (remoteData.se != remote_last_key_state) {
                         if (remoteData.se == 1) {
@@ -989,7 +1105,7 @@ private:
                 {myrobot,myrobot_command,"/m2006/left_motor",device::DjiMotor::Config{device::DjiMotor::Type::M2006}},
                 {myrobot,myrobot_command,"/m2006/right_motor",device::DjiMotor::Config{device::DjiMotor::Type::M2006}.set_reversed()}})
             , arm_m2006_motor_({
-                {myrobot,myrobot_command,"/arm/joint4/motor",device::DjiMotor::Config{device::DjiMotor::Type::M2006}}})
+                {myrobot,myrobot_command,"/arm/joint4/motor",device::DjiMotor::Config{device::DjiMotor::Type::M2006}.enable_multi_turn_angle()}})
             , sbus_motor_ctrl_(std::make_shared<SBUS_Motor_Ctrl>(myrobot))
             , myrobot(myrobot)
             , xrobot_(myrobot)
@@ -1024,6 +1140,7 @@ private:
                 if(i<=1)
                     m2006_motor_[i].update_status();
             }
+            arm_m2006_motor_[0].update_status();
             myrobot.publish_state();
         }
         void command_update() //命令更新
@@ -1032,12 +1149,20 @@ private:
                 chassis_cmd[i] = dji_chassis_motor_[i].generate_command();
                 if(i<=1){
                     m2006_cmd[i] = m2006_motor_[i].generate_command();
-                    m2006_cmd[i+2] = 0;
                 }
             }
+            const auto& go1_command = myrobot.arm_ctrl_->get_go1_command();
+            m2006_cmd[2] = arm_m2006_motor_[0].generate_command();
+            m2006_cmd[3] = 0;
             TransmitBuffer.add_can1_transmission(0x200, std::bit_cast<uint64_t>(chassis_cmd));
             TransmitBuffer.add_can1_transmission(0x1ff, std::bit_cast<uint64_t>(m2006_cmd));
             TransmitBuffer.trigger_transmission();
+
+            for(int i = 0;i<3;i++){
+                arm_go1_manager_[i+1].set_motor(go1_command[i].T, go1_command[i].Kp, 
+                                              go1_command[i].Pos, go1_command[i].Kd, go1_command[i].V);
+                                              
+            }
         }
        
     private:
@@ -1109,6 +1234,7 @@ private:
 
     std::shared_ptr<MyrobotCommand> command_component_;
     std::unique_ptr<DMH7_Board> board_;
+    std::shared_ptr<Arm_Ctrl> arm_ctrl_;
     std::shared_ptr<DM_Motor_Ctrl> dm_motor_ctrl_;
     std::shared_ptr<RS01_Motor_Ctrl> rs01_motor_ctrl_;
     std::shared_ptr<Chassis_Ctrl> chassis_ctrl_;

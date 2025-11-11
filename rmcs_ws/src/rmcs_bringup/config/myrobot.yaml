@@ -22,7 +22,7 @@ myrobot_hardware:
     chassis_dead_zone: 0.8
     integral_min: -50.0
     integral_max: 50.0
-#M2006参数
+#辅助轮M2006参数
     m2006_pid_kp: 0.45
     m2006_pid_ki: 0.0001
     m2006_pid_kd: 0.1
@@ -31,7 +31,24 @@ myrobot_hardware:
     m2006_integral_max: 50.0
     m2006_max_vel: 40.0
     m2006_max_torque: 1.0
-
+# 机械臂M2006位置环
+    arm_m2006_pos_kp: 5.0         
+    arm_m2006_pos_ki: 0.0          
+    arm_m2006_pos_kd: 0.0      
+    arm_m2006_pos_dead_zone: 0.01  
+    arm_m2006_pos_integral_min: -2.0
+    arm_m2006_pos_integral_max: 2.0
+    
+# 机械臂M2006速度环
+    arm_m2006_vel_kp: 0.08         
+    arm_m2006_vel_ki: 0.005        
+    arm_m2006_vel_kd: 0.01         
+    arm_m2006_vel_dead_zone: 0.05  
+    arm_m2006_vel_integral_min: -0.1
+    arm_m2006_vel_integral_max: 0.1
+    
+    arm_m2006_max_vel: 10.0        
+    arm_m2006_max_torque: 0.3      
 broadcaster:
   ros__parameters:
     forward_list:
@@ -39,3 +56,11 @@ broadcaster:
       - /chassis/left_back_wheel/velocity
       - /chassis/right_back_wheel/velocity
       - /chassis/right_front_wheel/velocity
+      - /myrobot/arm/joint1/pos
+      - /myrobot/arm/joint2/pos
+      - /myrobot/arm/joint3/pos
+      - /myrobot/arm/joint4/pos
+      - /myrobot/arm/joint1/vel
+      - /myrobot/arm/joint2/vel
+      - /myrobot/arm/joint3/vel
+      - /myrobot/arm/joint4/vel
