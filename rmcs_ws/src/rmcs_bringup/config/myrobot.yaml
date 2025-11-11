@@ -1,0 +1,41 @@
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_core::hardware::Myrobot -> myrobot_hardware
+      - rmcs_core::broadcaster::ValueBroadcaster -> broadcaster  
+myrobot_hardware:
+  ros__parameters:
+    usb_pid: 0x1b1b
+
+#底盘机械参数
+    wheel_base: 0.40      #底盘轮距，左右轮距离
+    track_width: 0.40     #底盘轴距，前后轮距离
+    wheel_radius: 0.0493   #底盘轮子半径
+    wheel_max_vel: 40.0   #rad/s,M3508电机经过减速器后的最大速度
+    wheel_max_torque: 3.0
+
+#底盘PID参数
+    chassis_pid_kp: 1.1
+    chassis_pid_ki: 0.0001
+    chassis_pid_kd: 0.2
+    chassis_dead_zone: 0.8
+    integral_min: -50.0
+    integral_max: 50.0
+#M2006参数
+    m2006_pid_kp: 0.45
+    m2006_pid_ki: 0.0001
+    m2006_pid_kd: 0.1
+    m2006_dead_zone: 0.8
+    m2006_integral_min: -50.0
+    m2006_integral_max: 50.0
+    m2006_max_vel: 40.0
+    m2006_max_torque: 1.0
+
+broadcaster:
+  ros__parameters:
+    forward_list:
+      - /chassis/left_front_wheel/velocity
+      - /chassis/left_back_wheel/velocity
+      - /chassis/right_back_wheel/velocity
+      - /chassis/right_front_wheel/velocity

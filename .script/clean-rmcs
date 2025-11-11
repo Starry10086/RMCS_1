@@ -1,0 +1,4 @@
+#! /bin/bash
+
+rm -rf ${RMCS_PATH}/rmcs_ws/build ${RMCS_PATH}/rmcs_ws/install ${RMCS_PATH}/rmcs_ws/log
+

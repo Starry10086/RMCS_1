@@ -1,0 +1,52 @@
+CompileFlags:
+  # 指定编译数据库的位置（colcon build 会在 build 目录生成）
+  CompilationDatabase: rmcs_ws/build
+  
+  Add:
+    - "-std=c++20"
+    - "--gcc-toolchain=/usr"
+    - "-I/usr/include/c++/12"
+    - "-I/usr/include/x86_64-linux-gnu/c++/12"
+    # ROS 2 Humble 头文件路径
+    - "-I/opt/ros/humble/include"
+    - "-I/opt/ros/humble/include/rclcpp"
+    - "-I/opt/ros/humble/include/rclcpp_lifecycle"
+    - "-I/opt/ros/humble/include/hardware_interface"
+    - "-I/opt/ros/humble/include/pluginlib"
+    # robot_arm 项目头文件路径
+    - "-I/workspaces/RMCS/robot_arm/control/Inc"
+    - "-I/workspaces/RMCS/rmcs_ws/src/rmcs_core/src/hardware"
+    - "-I/workspaces/RMCS/rmcs_ws/src/rmcs_core/src/hardware/unitree_legs"
+    - "-I/workspaces/RMCS/rmcs_ws/src/rmcs_core/librmcs"  
+    - "-I/usr/include/libusb-1.0"       
+  Remove:
+    - "-m*"
+    - "-f*-sanitizer"
+
+Diagnostics:
+  # 配置诊断信息
+  UnusedIncludes: Relaxed
+  MissingIncludes: Relaxed
+
+Index:
+  # 索引后台线程数
+  Background: Build
+  
+  # 标准库索引
+  StandardLibrary: Yes
+
+Completion:
+  # 代码补全选项
+  AllScopes: Yes
+
+InlayHints:
+  # 显示内联提示
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+
+Hover:
+  # 悬停显示完整签名
+  ShowAKA: Yes
+
+

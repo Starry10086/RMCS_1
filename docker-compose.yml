@@ -1,0 +1,43 @@
+services:
+  rmcs-develop:
+    image: rmcs-develop:humble
+    user: "${CONTAINER_USER}"
+    privileged: true
+    # 添加GPU运行时支持
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, graphics, compute, utility]
+    command: >
+      bash -c "
+        sudo chown -R ${CONTAINER_USER}:${CONTAINER_USER} ${CONTAINER_HOME}/.config
+        exec bash
+      "
+    volumes:
+      - /dev:/dev:bind
+      - /tmp/.X11-unix:/tmp/.X11-unix:bind
+      - /run/user/1000/wayland-0:/run/user/1000/wayland-0
+      - ${HOST_NVIM_DIR}:${CONTAINER_HOME}/.config/nvim/:bind
+      - .:/workspaces/RMCS:bind
+      # 时间同步
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - DISPLAY=${DISPLAY}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
+      # 添加NVIDIA环境变量
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - QT_X11_NO_MITSHM=1
+    network_mode: host
+    tty: true
+    stdin_open: true 
+    
+  rmcs-runtime:
+  build:
+    context: .
+    target: rmcs-runtime
+    dockerfile: Dockerfile
+  image: rmcs-runtime:humble

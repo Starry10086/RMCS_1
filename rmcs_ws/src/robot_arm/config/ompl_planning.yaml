@@ -1,0 +1,33 @@
+# ==========================================
+# OMPL路径规划配置
+# Open Motion Planning Library - MoveIt使用的规划算法
+# ==========================================
+
+# 可用的规划器配置
+planner_configs:
+  # RRT-Connect: 快速、适合大多数场景
+  RRTConnect:
+    type: geometric::RRTConnect
+  
+  # RRT: 基础快速随机树算法
+  RRT:
+    type: geometric::RRT
+  
+  # PRM: 概率路线图，适合复杂环境
+  PRM:
+    type: geometric::PRM
+
+# 机械臂规划组配置
+arm:
+  # 该规划组可用的规划器列表
+  planner_configs:
+    - RRTConnect  # 默认使用RRT-Connect
+    - RRT
+    - PRM
+  
+  # 投影评估器 - 用于可视化和采样（使用前2个关节）
+  projection_evaluator: joints(joint1,joint2)
+  
+  # 最长有效段分数 - 路径插值精度（越小越精确）
+  longest_valid_segment_fraction: 0.01
+

@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<library path="librobot_arm_hardware">
+  <class name="unitree_hardware/UnitreeHardwareInterface" 
+         type="unitree_hardware::UnitreeHardwareInterface" 
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      ROS2 Control hardware interface for Unitree GO1 motors
+    </description>
+  </class>
+</library>
