@@ -521,6 +521,9 @@ private:
             , joint_cmd_{0.0, 0.0, 0.0, 0.0}
             , joint4_pos_pid_calculator_(0, 0, 0)  // 位置环PID
             , joint4_vel_pid_calculator_(0, 0, 0)  // 速度环PID
+            , go1_control_thread_([this]() {go1_control_loop();})
+            , go1_thread_running_(true)
+            , go1_command_ready_(false)
             {
                 register_output("/myrobot/arm/joint1/pos", joint1_pos_,false);
                 register_output("/myrobot/arm/joint1/vel", joint1_vel_,false);
@@ -536,6 +539,13 @@ private:
                 register_input("/myrobot/arm/joint2/cmd", joint2_cmd_,false);
                 register_input("/myrobot/arm/joint3/cmd", joint3_cmd_,false);
                 register_input("/myrobot/arm/joint4/cmd", joint4_cmd_,false);
+            }
+            ~Arm_Ctrl(){
+                go1_thread_running_ = false;
+                go1_cv_.notify_all();
+                if(go1_control_thread_.joinable()){
+                    go1_control_thread_.join();
+                }
             }
             void set_arm_m2006_param(
                     double pos_kp, double pos_ki, double pos_kd, double pos_dead_zone,
@@ -570,11 +580,17 @@ private:
             float V;
         };
         const std::array<GO1_Command, 3>& get_go1_command() const{return go1_command_;}
+
         void update() override {
             read_from_hardware();
             publish_states();
             read_command();
             control_joint();
+            {
+                std::lock_guard<std::mutex> lock(go1_mutex_);
+                go1_command_ready_ = true;
+            }
+            go1_cv_.notify_one();
         }
     private:
         void publish_states(){
@@ -603,10 +619,10 @@ private:
             RCLCPP_INFO(myrobot_.get_logger(), "joint4 pos: %f, vel: %f", joint_pos_[3], joint_vel_[3]);
         }
         void read_command(){
-            joint_cmd_[0] = 0;
-            joint_cmd_[1] = 0;
-            joint_cmd_[2] = 0;
-            joint_cmd_[3] = 2;
+            joint_cmd_[0] = 1;
+            joint_cmd_[1] = 1;
+            joint_cmd_[2] = 1;
+            joint_cmd_[3] = 5;
             // // 从输入读取命令到 joint_cmd_（先检查 ready()）
             // if (joint1_cmd_.ready()) joint_cmd_[0] = *joint1_cmd_;
             // if (joint2_cmd_.ready()) joint_cmd_[1] = *joint2_cmd_;
@@ -623,6 +639,26 @@ private:
                 go1_command_[i].V = 0.0;
             }
             joint4_control();
+        }
+        void go1_control_loop(){
+            while(go1_thread_running_){
+                std::unique_lock<std::mutex> lock(go1_mutex_);
+                //等待新命令或退出信号
+                go1_cv_.wait(lock,[this]() {
+                    return go1_command_ready_ || !go1_thread_running_;
+                });
+                if(!go1_thread_running_) break;
+
+                //复制命令（避免长时间持锁）
+                auto commands = go1_command_;
+                go1_command_ready_ = false;
+                lock.unlock();
+                // 执行阻塞性的set_motor操作（不持锁）
+                for(int i=0;i<3;++i){
+                    myrobot_.board_->arm_go1_manager_[i+1].set_motor(commands[i].T, commands[i].Kp,
+                                                                   commands[i].Pos, commands[i].Kd, commands[i].V);
+                }
+            }
         }
         void joint4_control(){
             joint4_pos_error_ = joint_cmd_[3] - joint_pos_[3];
@@ -653,10 +689,6 @@ private:
         std::array<double, 4> joint_vel_;
         std::array<double, 4> joint_cmd_;
         std::array<GO1_Command, 3> go1_command_;
-        // 关节4串级PID相关变量
-        double joint4_target_vel_;
-        double joint4_pos_error_;
-        double joint4_vel_error_;
         rmcs_executor::Component::OutputInterface<double> joint1_pos_,joint1_vel_;
         rmcs_executor::Component::OutputInterface<double> joint2_pos_,joint2_vel_;
         rmcs_executor::Component::OutputInterface<double> joint3_pos_,joint3_vel_;
@@ -674,9 +706,19 @@ private:
         double vel_integral_min, vel_integral_max;
         double max_vel, max_torque;
     };
+    // 关节4串级PID相关变量
+    double joint4_target_vel_;
+    double joint4_pos_error_;
+    double joint4_vel_error_;
     ArmM2006PIDConfig arm_m2006_config_;
     rmcs_core::controller::pid::MatrixPidCalculator<1> joint4_pos_pid_calculator_;  // 位置环
     rmcs_core::controller::pid::MatrixPidCalculator<1> joint4_vel_pid_calculator_;  // 速度环
+    // GO1 线程相关成员变量
+    std::thread go1_control_thread_;
+    std::mutex go1_mutex_;
+    std::condition_variable go1_cv_;
+    std::atomic<bool> go1_thread_running_;
+    bool go1_command_ready_;
     };
 
 /************************************************************SBUS************************************************************************* */
@@ -1158,11 +1200,11 @@ private:
             TransmitBuffer.add_can1_transmission(0x1ff, std::bit_cast<uint64_t>(m2006_cmd));
             TransmitBuffer.trigger_transmission();
 
-            for(int i = 0;i<3;i++){
-                arm_go1_manager_[i+1].set_motor(go1_command[i].T, go1_command[i].Kp, 
-                                              go1_command[i].Pos, go1_command[i].Kd, go1_command[i].V);
-                                              
-            }
+            // for(int i = 0;i<3;i++){
+            //     arm_go1_manager_[i+1].set_motor(go1_command[i].T, go1_command[i].Kp, 
+            //                                   go1_command[i].Pos, go1_command[i].Kd, go1_command[i].V);
+
+            // }
         }
        
     private:
