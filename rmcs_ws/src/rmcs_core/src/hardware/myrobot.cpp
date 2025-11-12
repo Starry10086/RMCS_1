@@ -521,9 +521,9 @@ private:
             , joint_cmd_{0.0, 0.0, 0.0, 0.0}
             , joint4_pos_pid_calculator_(0, 0, 0)  // 位置环PID
             , joint4_vel_pid_calculator_(0, 0, 0)  // 速度环PID
-            , go1_control_thread_([this]() {go1_control_loop();})
             , go1_thread_running_(true)
             , go1_command_ready_(false)
+            , go1_control_thread_([this]() {go1_control_loop();})
             {
                 register_output("/myrobot/arm/joint1/pos", joint1_pos_,false);
                 register_output("/myrobot/arm/joint1/vel", joint1_vel_,false);
@@ -619,7 +619,7 @@ private:
             RCLCPP_INFO(myrobot_.get_logger(), "joint4 pos: %f, vel: %f", joint_pos_[3], joint_vel_[3]);
         }
         void read_command(){
-            joint_cmd_[0] = 1;
+            joint_cmd_[0] = 3;
             joint_cmd_[1] = 1;
             joint_cmd_[2] = 1;
             joint_cmd_[3] = 5;
@@ -714,11 +714,11 @@ private:
     rmcs_core::controller::pid::MatrixPidCalculator<1> joint4_pos_pid_calculator_;  // 位置环
     rmcs_core::controller::pid::MatrixPidCalculator<1> joint4_vel_pid_calculator_;  // 速度环
     // GO1 线程相关成员变量
-    std::thread go1_control_thread_;
     std::mutex go1_mutex_;
-    std::condition_variable go1_cv_;
+    std::condition_variable go1_cv_;// 线程间通信
     std::atomic<bool> go1_thread_running_;
     bool go1_command_ready_;
+    std::thread go1_control_thread_;
     };
 
 /************************************************************SBUS************************************************************************* */
@@ -1156,7 +1156,7 @@ private:
             {
                 gpio_ctrl_ = std::make_unique<GpioCtrl>([this](uint32_t can_id, uint64_t can_data)->bool
                 {
-                    TransmitBuffer.add_can1_transmission(can_id, can_data);
+                    TransmitBuffer.add_can2_transmission(can_id, can_data);
                     return TransmitBuffer.trigger_transmission();
                 });
                 // 与GO1建立联系
